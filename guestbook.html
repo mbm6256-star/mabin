@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>방명록</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f4f6f0;color:#243e32;font:16px/1.6 system-ui,"Malgun Gothic",sans-serif}main{max-width:700px;margin:40px auto;padding:0 18px}h1{margin-bottom:8px}section{background:white;border:1px solid #d6dfd3;border-radius:16px;padding:22px;margin:22px 0}label{display:block;font-weight:700;margin:14px 0 6px}input,textarea,button{font:inherit}input,textarea{width:100%;padding:12px;border:1px solid #aebcaf;border-radius:8px}textarea{resize:vertical;min-height:130px}button{border:0;border-radius:8px;background:#28583d;color:white;padding:11px 18px;cursor:pointer}button:disabled{opacity:.55;cursor:wait}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid #96bd62;outline-offset:3px}.heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.heading h2{margin:0}#refresh{background:#e9efe4;color:#243e32}ul{list-style:none;margin:0;padding:0}li{padding:18px 0;border-bottom:1px solid #e1e7dc;overflow-wrap:anywhere}li:last-child{border-bottom:0}li p{white-space:pre-wrap;margin:8px 0}time{display:block;font-size:13px;color:#647064}.status{min-height:1.6em;overflow-wrap:anywhere}.error{color:#a32727}.hint{font-size:14px;color:#596a5d}code{overflow-wrap:anywhere}#config-note{background:#fff2d8;padding:14px;border-radius:8px}@media(max-width:480px){main{margin:22px auto}section{padding:16px}}
+  </style>
+</head>
+<body>
+<main>
+  <h1>방명록</h1>
+  <p>다녀간 이야기를 남겨주세요.</p>
+  <p id="config-note" hidden>연결 설정이 필요합니다. 이 HTML 파일의 <code>SUPABASE_URL</code>과 <code>SUPABASE_KEY</code>를 입력하고, <code>supabase/guestbook.sql</code>을 Supabase SQL Editor에서 실행해주세요.</p>
+  <section aria-labelledby="write-title">
+    <h2 id="write-title">글 남기기</h2>
+    <p class="hint">작성한 이름과 내용은 누구나 볼 수 있습니다.</p>
+    <form id="guestbook-form">
+      <label for="name">이름</label>
+      <input id="name" name="name" required maxlength="40" autocomplete="nickname">
+      <label for="message">내용</label>
+      <textarea id="message" name="message" required maxlength="2000"></textarea>
+      <p class="hint">이름 40자, 내용 2,000자까지 남길 수 있습니다.</p>
+      <button id="submit" type="submit">글 남기기</button>
+    </form>
+    <p id="write-status" class="status" role="status" aria-live="polite"></p>
+  </section>
+  <section aria-labelledby="list-title" aria-busy="false" id="list-section">
+    <div class="heading"><h2 id="list-title">남겨주신 글</h2><button id="refresh" type="button">새로고침</button></div>
+    <p id="list-status" class="status" role="status" aria-live="polite"></p>
+    <ul id="entries" aria-label="방명록 글 목록"></ul>
+    <button id="more" type="button" hidden>이전 글 더 보기</button>
+  </section>
+  <noscript>방명록을 사용하려면 브라우저에서 JavaScript를 켜주세요.</noscript>
+</main>
+<script>
+'use strict';
+// ===== 아래 두 값만 본인의 Supabase 프로젝트 값으로 바꾸세요. =====
+const SUPABASE_URL = '여기에_SUPABASE_URL'; // 예: https://프로젝트ID.supabase.co
+const SUPABASE_KEY = '여기에_SUPABASE_PUBLISHABLE_KEY'; // sb_publishable_... 또는 기존 anon 공개 키
+// 브라우저에 공개되는 설정입니다. secret 키나 service_role 키는 넣지 마세요.
+// 테이블 준비: supabase/guestbook.sql을 Supabase의 SQL Editor에서 실행하세요.
+
+const $ = id => document.getElementById(id);
+const PAGE_SIZE = 30;
+let endpoint = '', offset = 0, loading = false, saving = false;
+const shown = new Set();
+
+function status(id, message, error = false) {
+  $(id).textContent = message;
+  $(id).classList.toggle('error', error);
+}
+function configure() {
+  if (SUPABASE_URL.includes('여기에_') || SUPABASE_KEY.includes('여기에_')) return false;
+  const url = new URL(SUPABASE_URL);
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw Error('Supabase URL은 https://프로젝트ID.supabase.co 형태로 입력해주세요.');
+  if (SUPABASE_KEY.startsWith('sb_secret_')) throw Error('secret 키는 사용할 수 없습니다. Publishable 키를 입력해주세요.');
+  if (!SUPABASE_KEY.startsWith('sb_publishable_')) {
+    // 기존 anon JWT 키도 지원하되 서버 관리자 키는 거부합니다.
+    let payload;
+    try { payload = JSON.parse(atob(SUPABASE_KEY.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); }
+    catch { throw Error('Publishable 키 또는 기존 anon 공개 키를 입력해주세요.'); }
+    if (payload.role !== 'anon') throw Error('브라우저에는 anon 공개 키만 사용할 수 있습니다.');
+  }
+  endpoint = url.origin + '/rest/v1/guestbook';
+  return true;
+}
+async function request(query, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(endpoint + query, {
+      ...options,
+      headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json', ...options.headers },
+      signal: controller.signal,
+      cache: 'no-store'
+    });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) throw Error('연결 키 또는 테이블의 읽기·쓰기 권한을 확인해주세요.');
+      if (response.status === 404) throw Error('guestbook 테이블을 찾을 수 없습니다. 테이블 설정 SQL을 실행해주세요.');
+      if (response.status === 400) throw Error('테이블 열(name, message, created_at, id)과 입력 길이를 확인해주세요.');
+      throw Error('서버 요청에 실패했습니다. (상태 ' + response.status + ')');
+    }
+    return response.status === 204 ? null : await response.json();
+  } finally { clearTimeout(timer); }
+}
+function errorMessage(error) {
+  if (error.name === 'AbortError') return '응답 시간이 초과되었습니다. 인터넷 연결을 확인해주세요.';
+  if (error instanceof TypeError) return '연결할 수 없습니다. 인터넷 연결과 Supabase URL을 확인해주세요.';
+  return error.message;
+}
+function renderEntry(entry) {
+  if (shown.has(String(entry.id))) return;
+  shown.add(String(entry.id));
+  const item = document.createElement('li');
+  const name = document.createElement('strong');
+  const message = document.createElement('p');
+  const time = document.createElement('time');
+  // 입력한 HTML을 실행하지 않고 글자 그대로 표시합니다.
+  name.textContent = entry.name;
+  message.textContent = entry.message;
+  const date = new Date(entry.created_at);
+  if (!Number.isNaN(date.getTime())) {
+    time.dateTime = date.toISOString();
+    time.textContent = date.toLocaleString('ko-KR');
+  }
+  item.append(name, message, time);
+  $('entries').append(item);
+}
+async function loadEntries(reset = true) {
+  if (loading || !endpoint) return;
+  loading = true;
+  $('refresh').disabled = $('more').disabled = true;
+  $('list-section').setAttribute('aria-busy', 'true');
+  status('list-status', '글을 불러오는 중입니다…');
+  try {
+    const nextOffset = reset ? 0 : offset;
+    const rows = await request('?select=id,name,message,created_at&order=created_at.desc,id.desc&limit=' + PAGE_SIZE + '&offset=' + nextOffset);
+    if (!Array.isArray(rows)) throw Error('서버의 목록 응답 형식을 확인해주세요.');
+    if (reset) { $('entries').replaceChildren(); shown.clear(); }
+    rows.forEach(renderEntry);
+    offset = nextOffset + rows.length;
+    $('more').hidden = rows.length < PAGE_SIZE;
+    status('list-status', shown.size ? '최신 글부터 표시합니다.' : '아직 남겨진 글이 없습니다. 첫 글을 남겨주세요.');
+    return true;
+  } catch (error) { status('list-status', '목록을 불러오지 못했습니다. ' + errorMessage(error), true); return false; }
+  finally {
+    loading = false;
+    $('refresh').disabled = $('more').disabled = false;
+    $('list-section').setAttribute('aria-busy', 'false');
+  }
+}
+$('guestbook-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (saving || !endpoint) return;
+  const name = $('name').value.trim(), message = $('message').value.trim();
+  if (!name || !message) { status('write-status', '이름과 내용을 공백 없이 입력해주세요.', true); return; }
+  if (name.length > 40 || message.length > 2000) { status('write-status', '이름은 40자, 내용은 2,000자 이내로 입력해주세요.', true); return; }
+  saving = true;
+  $('submit').disabled = true;
+  $('name').readOnly = $('message').readOnly = true;
+  status('write-status', '글을 저장하는 중입니다…');
+  try {
+    await request('', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ name, message }) });
+    $('guestbook-form').reset();
+    status('write-status', '글이 저장되었습니다.');
+    // 진행 중인 목록 요청이 있으면 완료 후 새 목록을 읽습니다.
+    if (loading) await pendingLoad;
+    pendingLoad = loadEntries();
+    await pendingLoad;
+  } catch (error) {
+    status('write-status', errorMessage(error) + ' 전송 후 연결이 끊겼다면 저장되었을 수 있으니 목록을 새로고침한 뒤 다시 시도해주세요.', true);
+  } finally {
+    saving = false;
+    $('submit').disabled = false;
+    $('name').readOnly = $('message').readOnly = false;
+  }
+});
+let pendingLoad = Promise.resolve();
+$('refresh').onclick = () => { pendingLoad = loadEntries(); };
+$('more').onclick = () => { pendingLoad = loadEntries(false); };
+try {
+  if (configure()) { pendingLoad = loadEntries(); }
+  else { $('config-note').hidden = false; $('submit').disabled = $('refresh').disabled = true; }
+} catch (error) {
+  $('config-note').hidden = false;
+  $('submit').disabled = $('refresh').disabled = true;
+  status('list-status', error.message, true);
+}
+</script>
+</body>
+</html>
