@@ -5,7 +5,7 @@ const root = new URL('../', import.meta.url);
 const output = new URL('dist/', root);
 const files = [
   'index.html', 'styles.css', 'core.js', 'app.js', 'pose-analysis.js',
-  'pose-metrics.mjs', 'pose-3d.mjs', 'pose-engine.mjs', 'pose-compare.mjs', 'pose-phases.mjs'
+  'pose-metrics.mjs', 'pose-3d.mjs', 'pose-engine.mjs', 'pose-compare.mjs', 'pose-phases.mjs', 'pose-labels.mjs'
 ];
 const keyPattern = /sb_secret_[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{12,}\.eyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{15,}/;
 

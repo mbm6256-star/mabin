@@ -73,7 +73,7 @@ test('public build contains only intended static assets and resolves all local b
   const assets = await readdir(new URL('./dist/', import.meta.url));
   assert.deepEqual(assets.sort(), [
     'app.js', 'core.js', 'index.html', 'pose-3d.mjs', 'pose-analysis.js', 'pose-compare.mjs',
-    'pose-engine.mjs', 'pose-metrics.mjs', 'pose-phases.mjs', 'styles.css'
+    'pose-engine.mjs', 'pose-labels.mjs', 'pose-metrics.mjs', 'pose-phases.mjs', 'styles.css'
   ]);
   for (const asset of assets) {
     const text = await readFile(new URL('./dist/' + asset, import.meta.url), 'utf8');

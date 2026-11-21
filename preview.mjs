@@ -8,7 +8,7 @@ import {ApiError, configuration, playersFrom, query, readResponse} from './serve
 import {randomBytes} from 'node:crypto';
 const root=path.dirname(fileURLToPath(import.meta.url));
 try{process.loadEnvFile(path.join(root,'.env'));}catch(error){if(error.code!=='ENOENT') throw Error('Unable to load server .env file');}
-const files=new Set(['index.html','styles.css','core.js','app.js','pose-analysis.js','pose-metrics.mjs','pose-3d.mjs','pose-engine.mjs','pose-compare.mjs','pose-phases.mjs','sample-data.json','STORYBOARD.html','PRD.md','ACCEPTANCE.md','README.md']);
+const files=new Set(['index.html','styles.css','core.js','app.js','pose-analysis.js','pose-metrics.mjs','pose-3d.mjs','pose-engine.mjs','pose-compare.mjs','pose-phases.mjs','pose-labels.mjs','sample-data.json','STORYBOARD.html','PRD.md','ACCEPTANCE.md','README.md']);
 const types={'.html':'text/html','.css':'text/css','.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.md':'text/plain'};
 function localRequest(req){
   const origin=`http://127.0.0.1:${req.socket.localPort}`;

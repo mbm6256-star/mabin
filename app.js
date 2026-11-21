@@ -38,6 +38,9 @@ function matchTable(matches, playerId = null) {
 }
 function metric(label, value) { return `<div class="card"><div class="metric-label">${label}</div><div class="number">${value}</div></div>`; }
 function renderRanking(rows) {
+  $('ranking-metrics').innerHTML = metric('등록 선수', rows.length) +
+    metric('순위에 포함된 선수', rows.filter(player => player.rank != null).length) +
+    metric('완료된 단식 경기', data.matches.length);
   if (!rows.length) { $('ranking-table').innerHTML = '<p class="empty">DB에 등록된 선수가 없어 랭킹을 표시할 수 없습니다.</p>'; return; }
   const key = $('sort').value, direction = $('direction').value === 'desc' ? -1 : 1;
   const sorted = [...rows].sort((a, b) => {
@@ -59,14 +62,14 @@ function renderDashboard(rows) {
     return { date: m.date, value: wins / (i + 1) * 100 };
   });
   const reports = data.reports.filter(r => r.playerId === p.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  $('dashboard-content').innerHTML = `<h2>${esc(p.name)}의 기록</h2><div class="metric-cards">${metric('경기 수', p.played)}${metric('승 / 패', `${p.wins} / ${p.losses}`)}${metric('승률', rateOf(p))}${metric('세트 득 / 실', `${p.setsFor} / ${p.setsAgainst}`)}</div><div class="grid sectiongap"><article class="card"><h2>경기별 누적 승률</h2><p class="muted">경기일 순서 · 같은 날짜는 등록 순서. 경기 성적 변화이며 자세 개선의 증거가 아닙니다.</p>${trend.length ? `<div class="chart" role="img" aria-label="${esc(trend.map(t => t.date + ' ' + t.value.toFixed(1) + '%').join(', '))}">${trend.map(t => `<div class="chart-col"><span class="chart-label">${t.value.toFixed(1)}%</span><div class="bar" style="height:${Math.max(2, t.value)}px"></div><small>${esc(t.date.slice(5))}</small></div>`).join('')}</div>` : '<p class="empty">경기 기록이 없어 성장 추이를 표시하지 않습니다.</p>'}<h3 class="sectiongap">개인 경기 이력</h3>${matchTable(matches, p.id)}</article><article class="card"><h2>저장된 포핸드 데모 결과</h2><p class="muted">고정 샘플이며 실제 영상 측정 결과가 아닙니다. 원본 영상은 보관하지 않습니다.</p>${reports.length ? reports.map(r => `<div class="report-item"><span class="badge">샘플 리포트</span><p>${esc(formatDate(r.createdAt))}</p><p>팔꿈치 ${r.elbow}° · 무릎 ${r.knee}°</p><button class="btn secondary" data-report="${esc(r.id)}">저장 결과 보기</button></div>`).join('') : '<p class="empty">저장된 결과가 없습니다. 영상 분석 화면에서 데모를 저장해보세요.</p>'}<a class="btn secondary" href="#analysis">분석 데모로 →</a></article></div>`;
+  $('dashboard-content').innerHTML = `<h2>${esc(p.name)}의 기록</h2><div class="metric-cards">${metric('경기 수', p.played)}${metric('승 / 패', `${p.wins} / ${p.losses}`)}${metric('승률', rateOf(p))}${metric('세트 득 / 실', `${p.setsFor} / ${p.setsAgainst}`)}</div><div class="grid sectiongap"><article class="card"><h2>경기별 누적 승률</h2><p class="muted">경기일 순서 · 같은 날짜는 등록 순서. 경기 성적 변화이며 자세 개선의 증거가 아닙니다.</p>${trend.length ? `<div class="chart" role="img" aria-label="${esc(trend.map(t => t.date + ' ' + t.value.toFixed(1) + '%').join(', '))}">${trend.map(t => `<div class="chart-col"><span class="chart-label">${t.value.toFixed(1)}%</span><div class="bar" style="height:${Math.max(2, t.value)}px"></div><small>${esc(t.date.slice(5))}</small></div>`).join('')}</div>` : '<p class="empty">경기 기록이 없어 성장 추이를 표시하지 않습니다.</p>'}<h3 class="sectiongap">개인 경기 이력</h3>${matchTable(matches, p.id)}</article><article class="card"><h2>저장된 포핸드 예시</h2><p class="muted">이 브라우저에 저장한 고정 예시입니다. 실제 영상 분석 결과는 이 목록에 저장되지 않습니다.</p>${reports.length ? reports.map(r => `<div class="report-item"><span class="badge">샘플 리포트</span><p>${esc(formatDate(r.createdAt))}</p><p>팔꿈치 ${r.elbow}° · 무릎 ${r.knee}°</p><button class="btn secondary" data-report="${esc(r.id)}">저장 결과 보기</button></div>`).join('') : '<p class="empty">저장한 예시 리포트가 없습니다.</p>'}<a class="btn secondary" href="#analysis">영상 분석으로 이동</a></article></div>`;
 }
 function render() {
   updatePlayers();
   for (const id of ['analysis-player','profile','analyze','demo']) $(id).disabled = !data.players.length;
   const rows = Tennis.stats(data.players, data.matches);
   $('club-name').textContent = data.club;
-  $('home-metrics').innerHTML = metric('DB 등록 회원·선수', data.players.length) + metric('DB 완료된 단식 경기', data.matches.length) + metric('이 브라우저의 데모 리포트', data.reports.length);
+  $('home-metrics').innerHTML = metric('등록 선수', data.players.length) + metric('완료된 단식 경기', data.matches.length) + metric('이 브라우저의 예시 리포트', data.reports.length);
   $('home-matches').innerHTML = matchTable([...data.matches].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3));
   $('match-list').innerHTML = matchTable(data.matches);
   $('members').innerHTML = data.players.length ? '<p class="muted">DB 등록 선수 ' + data.players.length + '명</p><ul class="list">' + data.players.map(p => `<li>${esc(p.name)} <small>${esc(p.memberCode)}</small></li>`).join('') + '</ul>' : '<p class="empty">DB에 등록된 선수가 없습니다.</p>';
@@ -75,7 +78,7 @@ function render() {
 }
 function updateMatchForm() {
   $('match-form').querySelector('fieldset').disabled = !writeConfig.matchWritesEnabled || saving || loading || !data || data.players.length < 2;
-  $('match-submit').textContent = saving ? 'DB 저장 중…' : '경기 결과 DB 저장';
+  $('match-submit').textContent = saving ? 'DB 저장 중…' : '경기 결과 저장';
   $('refresh').disabled = saving || loading;
   $('reset').disabled = saving || loading || !data;
 }
@@ -88,7 +91,7 @@ async function loadWriteConfig() {
   } catch { writeConfig = {matchWritesEnabled:false}; }
   $('match-write-notice').textContent = writeConfig.matchWritesEnabled
     ? '개발용 DB 저장 · 관리자 인증 미구현. 저장하면 실제 DB에 경기와 세트가 추가됩니다. 공개 서비스용 기능이 아닙니다.'
-    : '조회 전용 모드입니다. 로컬 개발 환경에서만 경기 저장을 활성화할 수 있습니다.';
+    : '이 사이트에서는 경기 기록을 조회할 수 있습니다. 새 경기 저장은 현재 사용할 수 없습니다.';
 }
 function route(focus = true) {
   const id = ['home', 'analysis', 'matches', 'ranking', 'dashboard'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home';
@@ -113,9 +116,9 @@ function runDemo(withFile) {
     if (!file) { status('analysis-status', '먼저 영상을 선택하거나 영상 없이 샘플 보기를 눌러주세요.', true); return; }
     const type = file.type.toLowerCase();
     if (!/\.(mp4|webm)$/i.test(file.name) || (type && !['video/mp4', 'video/webm'].includes(type))) {
-      $('video').value = ''; status('analysis-status', '데모에서는 MP4/WebM 파일만 선택할 수 있습니다. 파일 내용은 검증하지 않습니다.', true); return;
+      $('video').value = ''; status('analysis-status', '예시 화면에서는 MP4·WebM 파일을 선택할 수 있습니다. 파일 내용은 읽지 않습니다.', true); return;
     }
-    if (file.size === 0 || file.size > 50 * 1024 * 1024) { $('video').value = ''; status('analysis-status', '데모 파일은 0바이트 초과, 50MB 이하여야 합니다.', true); return; }
+    if (file.size === 0 || file.size > 50 * 1024 * 1024) { $('video').value = ''; status('analysis-status', '비어 있지 않은 50MB 이하 파일을 선택하세요.', true); return; }
   }
   // Drop the input's file reference. Do not read bytes, create object URLs or upload.
   $('video').value = '';
@@ -131,13 +134,13 @@ async function load() {
   $('load-error').hidden = true; $('retry').disabled = true; $('refresh').disabled = true;
   $('app').hidden = true; $('reset').disabled = true; $('load-state').hidden = false;
   $('app').setAttribute('aria-busy', 'true');
-  $('club-name').textContent = 'DB 데이터 조회 중…';
+  $('club-name').textContent = '경기 기록을 불러오는 중…';
   status('global-status', '');
   clearReport();
   try {
     const [players, matches] = await Promise.all([fetchApi('/api/players'), fetchApi('/api/matches'), loadWriteConfig()]);
     validateApiData(players, matches);
-    data = {players, matches, reports:[], club:'TENNIS LAB · Supabase DB', demoAnalysis};
+    data = {players, matches, reports:[], club:'동아리 경기 기록', demoAnalysis};
     storageAvailable = true;
     let stored;
     try { stored = localStorage.getItem(KEY); } catch { storageAvailable = false; }
@@ -150,14 +153,14 @@ async function load() {
           if (!r || typeof r.id !== 'string' || ids.has(r.id) || r.demo !== true || !players.some(p => p.id === r.playerId) || !Number.isFinite(r.elbow) || !Number.isFinite(r.knee) || typeof r.summary !== 'string' || !Number.isFinite(Date.parse(r.createdAt))) return false;
           ids.add(r.id); return true;
         });
-      } catch { status('global-status', 'DB 조회 완료. 브라우저 데모 리포트 형식이 잘못되어 해당 리포트는 표시하지 않습니다.', true); }
+      } catch { status('global-status', 'DB 조회 완료. 브라우저 예시 리포트 형식이 잘못되어 해당 리포트는 표시하지 않습니다.', true); }
     }
     if (!$('global-status').textContent) status('global-status', `Supabase DB 조회 완료 · 선수 ${players.length}명 · 경기 ${matches.length}건. 기존 브라우저 선수·경기 기록은 사용하지 않습니다.`);
-    if (!storageAvailable) status('global-status', 'DB 조회 완료. 브라우저 저장소 접근이 차단되어 데모 리포트는 메모리에만 보관됩니다.', true);
+    if (!storageAvailable) status('global-status', 'DB 조회 완료. 브라우저 저장소 접근이 차단되어 예시 리포트는 메모리에만 보관됩니다.', true);
     const now = new Date(); if (!$('date').value) $('date').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     render(); if (data.players.length > 1 && $('player-a').value === $('player-b').value) $('player-b').value = data.players[1].id;
     $('app').hidden = false; $('reset').disabled = false; route(false);
-  } catch (error) { data = undefined; $('club-name').textContent = 'DB 조회 실패'; $('load-error').hidden = false; $('load-message').textContent = error.message; }
+  } catch (error) { data = undefined; $('club-name').textContent = '경기 기록을 불러오지 못했습니다.'; $('load-error').hidden = false; $('load-message').textContent = error.message; }
   finally { loading = false; $('load-state').hidden = true; $('app').setAttribute('aria-busy', 'false'); $('retry').disabled = false; updateMatchForm(); previewWinner(); }
 }
 async function fetchApi(url) {
@@ -166,7 +169,7 @@ async function fetchApi(url) {
   catch { throw Error('DB API에 연결할 수 없습니다. 로컬 서버 실행 상태와 네트워크를 확인해주세요.'); }
   let body;
   try { body = await response.json(); } catch { throw Error(`DB API 응답을 읽을 수 없습니다 (${url}, HTTP ${response.status}).`); }
-  if (!response.ok) throw Error(`${url}: ${typeof body?.error === 'string' ? body.error : 'DB 조회 실패'} (HTTP ${response.status})`);
+  if (!response.ok) throw Error(`${url}: ${typeof body?.error === 'string' ? body.error : '경기 기록을 불러오지 못했습니다.'} (HTTP ${response.status})`);
   if (response.headers.get('X-Data-Source') !== 'supabase' || !Array.isArray(body)) throw Error('DB 출처 또는 API 응답 형식을 확인할 수 없습니다.');
   return body;
 }
@@ -257,26 +260,26 @@ $('match-refresh').onclick = async () => {
 $('sort').onchange = $('direction').onchange = () => renderRanking(Tennis.stats(data.players, data.matches));
 $('profile').onchange = () => renderDashboard(Tennis.stats(data.players, data.matches));
 $('analyze').onclick = () => runDemo(true); $('demo').onclick = () => runDemo(false);
-['video', 'analysis-mode', 'analysis-player'].forEach(id => $(id).onchange = () => { clearReport(); status('analysis-status', '조건이 바뀌었습니다. 데모를 실행해주세요. 실제 AI 분석은 수행하지 않습니다.'); });
+['video', 'analysis-mode', 'analysis-player'].forEach(id => $(id).onchange = () => { clearReport(); status('analysis-status', '선택을 변경했습니다. 버튼을 눌러 예시를 열 수 있습니다.'); });
 $('save-report').onclick = () => {
   if (!data || !currentReport) return;
   try {
     if (data.reports.some(r => r.id === currentReport.id)) throw Error('이미 저장된 결과입니다.');
     const next = structuredClone(data); next.reports.push(structuredClone(currentReport)); commit(next);
     $('save-report').disabled = true;
-    status('analysis-status', storageAvailable ? '이 브라우저에 데모 리포트를 저장했습니다. DB에는 저장하지 않습니다. 개인 대시보드에서 다시 볼 수 있습니다.' : '결과를 메모리에만 반영했습니다. 새로고침하면 사라집니다.');
+    status('analysis-status', storageAvailable ? '이 브라우저에 예시 리포트를 저장했습니다. DB에는 저장하지 않습니다. 개인 대시보드에서 다시 볼 수 있습니다.' : '결과를 메모리에만 반영했습니다. 새로고침하면 사라집니다.');
   } catch (error) { status('analysis-status', error.message, true); }
 };
 document.addEventListener('click', e => {
   const profile = e.target.closest('[data-profile]'), report = e.target.closest('[data-report]');
   if (profile) { $('profile').value = profile.dataset.profile; renderDashboard(Tennis.stats(data.players, data.matches)); location.hash = 'dashboard'; }
-  if (report) { const r = data.reports.find(r => r.id === report.dataset.report); if (r) { $('analysis-player').value = r.playerId; $('video').value = ''; showReport(r, true); status('analysis-status', '저장된 데모 결과입니다. 실제 영상 분석 결과가 아닙니다.'); location.hash = 'analysis'; } }
+  if (report) { const r = data.reports.find(r => r.id === report.dataset.report); if (r) { $('analysis-player').value = r.playerId; $('video').value = ''; showReport(r, true); status('analysis-status', '이 브라우저에 저장한 고정 예시입니다.'); $('sample-panel').open = true; location.hash = 'analysis'; } }
 });
 $('reset').onclick = () => {
-  if (!data || !confirm('이 브라우저의 포핸드 데모 리포트만 지울까요? DB 선수·경기 데이터는 유지됩니다.')) return;
+  if (!data || !confirm('이 브라우저의 포핸드 예시 리포트만 지울까요? DB 선수·경기 데이터는 유지됩니다.')) return;
   try {
     commit({...data, reports:[]}); clearReport(); $('video').value = '';
-    status('analysis-status', '이 브라우저의 데모 리포트를 초기화했습니다. DB 데이터는 변경하지 않았습니다.');
+    status('analysis-status', '이 브라우저의 예시 리포트를 초기화했습니다. DB 데이터는 변경하지 않았습니다.');
   } catch (error) { status('global-status', error.message, true); }
 };
 $('refresh').onclick = load;

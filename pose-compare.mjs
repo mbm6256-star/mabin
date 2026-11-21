@@ -1,7 +1,7 @@
 import { analyzeClip, drawOverlay, frameIndex, loadClip, sampleRate, validateClip } from './pose-engine.mjs';
 import { chartPath, measureFrames, measurementDifference, pairedSamples } from './pose-metrics.mjs';
 
-import { detectSwingPhases, swingPhases, validSwingBoundaries } from './pose-phases.mjs';
+import { automaticPhaseOrder, compareSwingBoundaries, hasComparablePhase, suggestSwingPhases, pairPhaseProgress, swingPhases, validSwingBoundaries } from './pose-phases.mjs';
 
 const panel = document.getElementById('pose-comparison-panel');
 const find = selector => panel.querySelector(selector);
@@ -10,11 +10,13 @@ const status = find('#pose-compare-status');
 const results = find('#pose-compare-results');
 const phaseControls = find('#pose-phase-controls');
 const phaseSelect = find('#pose-phase-select');
+const cameraView = find('#pose-compare-view');
+let alignedPhase = null;
+const boundaryLabels = [...swingPhases.map(phase => phase + ' 시작'), '팔로스루 종료'];
 const phaseDuration = find('#pose-phase-duration');
 for (const [index, label] of swingPhases.entries()) phaseSelect.add(new Option(label, index));
-phaseSelect.addEventListener('change', () => {
-  if (clips.every(clip => clip.frames.length)) updateComparison();
-});
+phaseSelect.addEventListener('change', updateComparison);
+cameraView.addEventListener('change', updateComparison);
 const slider = find('#pose-compare-time');
 const position = find('#pose-compare-position');
 const format = value => value.toFixed(1) + '°';
@@ -75,14 +77,101 @@ function updatePhaseTimeline(clip) {
   }
 }
 
+function renderPhaseValidation(clip) {
+  const output = clip.phaseValidation;
+  output.replaceChildren();
+  const comparison = compareSwingBoundaries(clip.automaticBoundaries, clip.manualBoundaries, clip.video.duration);
+  if (!clip.manualBoundaries) return;
+  const summary = document.createElement('p');
+  if (!comparison) {
+    summary.textContent = '자동 후보가 없어 시간 차이를 계산할 수 없습니다. 수동 경계로 비교할 수 있습니다.';
+    output.append(summary);
+    return;
+  }
+  summary.textContent = '자동−수동 평균 절대 차이 ' + Math.round(comparison.meanAbsoluteMs) +
+    'ms. 이 영상의 수동 기준과 비교한 값이며 탐지의 검증 정확도를 나타내지 않습니다.';
+  const list = document.createElement('ul');
+  for (const [index, label] of boundaryLabels.entries()) {
+    const item = document.createElement('li');
+    const delta = Math.round(comparison.offsets[index]);
+    item.textContent = label + ' · 자동 ' + seconds(clip.automaticBoundaries[index]) +
+      ' / 수동 ' + seconds(clip.manualBoundaries[index]) + ' · ' + (delta > 0 ? '+' : '') + delta + 'ms';
+    list.append(item);
+  }
+  output.append(summary, list);
+}
+
+
+function renderPhaseDiagnostics(clip, detection) {
+  const output = clip.phaseDiagnostics;
+  output.replaceChildren();
+  const attempts = detection.attempts ?? [detection];
+  const context = document.createElement('p');
+  context.textContent = '영상 ' + seconds(clip.video.duration) + ' · 분석 ' + clip.frames.length +
+    '개 시점 · ' + sampleRate + 'Hz (약 ' + Math.round(1000 / sampleRate) +
+    'ms 간격). 원본 FPS는 이 화면에서 측정하지 않습니다.';
+  output.append(context);
+  for (const attempt of attempts) {
+    const d = attempt.diagnostics;
+    const title = document.createElement('h4');
+    title.textContent = (attempt.side === 'left' ? '왼손' : '오른손') +
+      ' 검사 · 후보 ' + d.candidates + '세트 / 경계 ' + d.boundaryCount + '개';
+    const reason = document.createElement('p');
+    reason.textContent = attempt.reason || '현재 탐지 조건을 통과했습니다. 영상에서 후보를 확인하세요.';
+    output.append(title, reason);
+    const items = [
+      '몸통 보정 가능 ' + d.torsoSamples + '/' + d.sampleCount + '개 표본',
+      d.usableSamples === undefined ? '연속 탐지 신호는 계산하지 못했습니다.' :
+        '손목·양쪽 어깨 동시 사용 가능 ' + d.usableSamples + '/' + d.sampleCount +
+        '개 · 최장 연속 ' + d.longestStreak + '개 표본'
+    ];
+    if (Number.isFinite(d.peakSpeed)) {
+      items.push('최대 손목 상대 이동 ' + d.peakSpeed.toFixed(2) +
+        ' 몸통 길이/초 (' + seconds(d.peakTime) + ', 탐지 기준 1.50)');
+    }
+    if (Number.isFinite(d.shoulderTurn)) {
+      items.push('후보 구간 3D 어깨선 누적 방향 변화 ' + d.shoulderTurn.toFixed(1) + '° (탐지 기준 6°)');
+    }
+    for (const [key, label] of [['wrist', '타구측 손목'], ['elbow', '타구측 팔꿈치'], ['shoulders', '어깨 중심'], ['pelvis', '골반 중심']]) {
+      const signal = d.signals?.[key];
+      if (!signal) continue;
+      items.push(label + ' · 관측 ' + signal.visible + '/' + d.sampleCount +
+        '개 · 연속 이동 표본 ' + signal.steps + '쌍' + (signal.steps ?
+          ' · 표본 사이 최대 이동 ' + (signal.peak * 100).toFixed(2) + '% (영상 높이 기준)' : ''));
+    }
+    const list = document.createElement('ul');
+    for (const text of items) {
+      const item = document.createElement('li');
+      item.textContent = text;
+      list.append(item);
+    }
+    output.append(list);
+  }
+  const note = document.createElement('p');
+  note.textContent = '영상 좌표의 이동량에는 카메라 움직임과 추정 흔들림이 포함될 수 있습니다. 팔꿈치는 참고용이고 골반은 몸통 길이 보정에 쓰입니다. 관절 표시 수와 후보 통과 여부는 별도 지표입니다.';
+  output.append(note);
+}
+
+
 function suggestPhases(clip) {
   if (!clip.frames.length) return;
   clip.phaseEditor.hidden = false;
-  const { boundaries, reason } = detectSwingPhases(
+  clip.phaseDiagnostics.closest('details').hidden = false;
+  const detection = suggestSwingPhases(
     clip.frames, clip.side.value, clip.video.videoWidth, clip.video.videoHeight, sampleRate);
+  const { boundaries, reason, side, inferred } = detection;
+  renderPhaseDiagnostics(clip, detection);
+  clip.detectedSide = side;
+  clip.automaticBoundaries = boundaries;
+  if (clip.manualBoundaries) {
+    renderPhaseValidation(clip);
+    return;
+  }
   clip.boundaries = boundaries;
+  clip.timeline.hidden = false;
+  renderPhaseValidation(clip);
   clip.phaseStatus.textContent = boundaries
-    ? '자동 후보입니다. 재생 화면을 확인하고 필요하면 초 단위 경계를 수정하세요.'
+    ? (inferred ? '타구 손 후보: ' + (side === 'right' ? '오른손' : '왼손') + ' · ' : '') + '자동 후보입니다. 재생 화면에서 확인할 수 있습니다.'
     : reason;
   clip.phaseInputs.forEach((input, index) => {
     input.max = clip.video.duration;
@@ -100,21 +189,45 @@ function makeClip(label) {
     label, input: get('input'), side: get('select'), video: get('video'), canvas: get('canvas'),
     fileStatus: get('.compare-file-status'), poseStatus: get('.compare-pose-status'),
     anchorStatus: get('.compare-anchor-status'), preview: get('.compare-preview'),
-    viewerDetails: get('details'), frames: [], connections: []
+    viewerDetails: get('.compare-3d-panel'), frames: [], connections: []
   };
   clip.input.addEventListener('change', () => void selectClip(clip));
   clip.phaseEditor = get('.compare-phase-editor');
   clip.phaseStatus = get('.compare-phase-status');
   clip.timeline = get('.compare-phase-timeline');
-  clip.phaseInputs = [...swingPhases.map(phase => phase + ' 시작'), '팔로스루 종료'].map((text, index) => {
+  clip.phaseValidation = get('.compare-phase-validation');
+  clip.phaseDiagnostics = get('.compare-phase-diagnostic-output');
+  const diagnosticsPanel = get('.compare-phase-diagnostics');
+  clip.phaseInputs = boundaryLabels.map((text, index) => {
     const label = document.createElement('label');
     const input = document.createElement('input');
     input.type = 'number';
     input.min = 0;
     input.step = 'any';
     label.append((index + 1) + '. ' + text + ' (초)', input);
-    get('.compare-phase-inputs').append(label);
+    const mark = document.createElement('button');
+    mark.type = 'button';
+    mark.className = 'btn secondary';
+    mark.textContent = '현재 시점';
+    mark.setAttribute('aria-label', text + '에 현재 영상 시점 기록');
+    mark.addEventListener('click', () => {
+      clip.video.pause();
+      input.value = clip.video.currentTime;
+    });
+    const field = document.createElement('div');
+    field.append(label, mark);
+    get('.compare-phase-inputs').append(field);
     return input;
+  });
+  get('.compare-phase-manual').addEventListener('click', () => {
+    clip.phaseInputs.forEach(input => { input.value = ''; });
+    clip.timeline.hidden = true;
+    diagnosticsPanel.hidden = true;
+    clip.phaseValidation.replaceChildren();
+    clip.boundaries = undefined;
+    clip.manualBoundaries = undefined;
+    clip.phaseStatus.textContent = '수동 기준 입력 중 · 후보를 가렸습니다.';
+    updateComparison();
   });
   get('.compare-phase-apply').addEventListener('click', () => {
     const boundaries = clip.phaseInputs.map(input => input.valueAsNumber);
@@ -122,7 +235,12 @@ function makeClip(label) {
       clip.phaseStatus.textContent = '영상 길이 안에서 다섯 경계를 시간 순서대로 입력하세요. 적용된 경계는 유지됩니다.';
       return;
     }
+    clip.manualBoundaries = boundaries;
+    diagnosticsPanel.hidden = false;
+    if (phaseSelect.value === '') phaseSelect.value = 'auto';
     clip.boundaries = boundaries;
+    clip.timeline.hidden = false;
+    renderPhaseValidation(clip);
     clip.phaseStatus.textContent = '직접 지정한 경계를 적용했습니다.';
     updatePhaseTimeline(clip);
     updateComparison();
@@ -135,12 +253,13 @@ function makeClip(label) {
     clip.video.pause();
     clip.anchor = clip.video.currentTime;
     clip.anchorStatus.textContent = '지정 위치 ' + seconds(clip.anchor);
+    phaseSelect.value = '';
     updateComparison();
   });
   for (const name of ['seeking', 'seeked', 'timeupdate', 'pause']) {
     clip.video.addEventListener(name, () => renderClip(clip));
   }
-  clip.viewerDetails.addEventListener('toggle', async () => {
+  clip.loadViewer = async () => {
     if (!clip.viewerDetails.open || clip.viewer || clip.viewerLoading || !clip.frames.length) return;
     clip.viewerLoading = true;
     try {
@@ -154,7 +273,8 @@ function makeClip(label) {
     } finally {
       clip.viewerLoading = false;
     }
-  });
+  };
+  clip.viewerDetails.addEventListener('toggle', clip.loadViewer);
   return clip;
 }
 
@@ -176,9 +296,10 @@ async function selectClip(clip) {
   clip.frames = [];
   clip.anchor = undefined;
   clip.boundaries = undefined;
+  clip.manualBoundaries = undefined;
   clip.phaseEditor.hidden = true;
   phaseControls.hidden = true;
-  phaseSelect.value = '';
+  phaseSelect.value = 'auto';
   clip.anchorStatus.textContent = '';
   clip.viewerDetails.open = false;
   renderClip(clip);
@@ -230,6 +351,8 @@ start.addEventListener('click', async () => {
     for (const clip of clips) {
       clip.frames = [];
       clip.boundaries = undefined;
+      clip.manualBoundaries = undefined;
+      clip.phaseEditor.open = false;
       clip.phaseEditor.hidden = true;
       phaseControls.hidden = true;
       clip.viewerDetails.open = false;
@@ -244,6 +367,7 @@ start.addEventListener('click', async () => {
       clip.frames = data.frames;
       clip.connections = data.connections;
       suggestPhases(clip);
+      void clip.loadViewer();
       clip.fileStatus.textContent = '분석 완료 · 관절 표시 가능 ' + data.found + '/' + data.frames.length + '개 시점';
       renderClip(clip);
     }
@@ -259,41 +383,69 @@ start.addEventListener('click', async () => {
 const x = (time, first, span) => 35 + (span ? 376 * (time - first) / span : 188);
 const y = value => 102 - 92 * value / 180;
 
+const effectiveSide = clip => clip.side.value || clip.detectedSide || '';
+
+function measurementsFor(clip, index) {
+  return measureFrames(clip.frames, clip.video.videoWidth, clip.video.videoHeight, effectiveSide(clip), clip.frames[index]);
+}
+
+function alignPhase(phase) {
+  if (clips.some(clip => !clip.boundaries)) return null;
+  const intervals = clips.map(clip => clip.boundaries.slice(phase, phase + 2));
+  const anchors = clips.map((clip, index) =>
+    clip.frames.findIndex(frame => frame.time >= intervals[index][0] && frame.time < intervals[index][1]));
+  if (anchors.includes(-1)) return null;
+  const values = clips.map((clip, index) => measurementsFor(clip, anchors[index]));
+  return { phase, intervals, pairs: pairPhaseProgress(...values, ...intervals) };
+}
+
 function updateComparison() {
   if (clips.some(clip => !clip.frames.length)) return;
   phaseControls.hidden = false;
   results.hidden = true;
   phaseDuration.hidden = true;
-  const phase = phaseSelect.value === '' ? null : Number(phaseSelect.value);
-  if (phase === null && clips.some(clip => clip.anchor === undefined)) {
-    status.textContent = '두 영상의 기준 시점을 각각 지정하거나 스윙 후보 구간을 선택하세요.';
-    return;
-  }
-  if (phase !== null && clips.some(clip => !clip.boundaries)) {
-    status.textContent = '비교 보류 · 양쪽 영상에서 후보를 확인하거나 경계를 직접 지정하세요.';
-    return;
-  }
+  alignedPhase = null;
+  pairs = [];
+  const mode = phaseSelect.value;
   const [a, b] = clips;
-  const intervals = phase === null ? null : clips.map(clip => clip.boundaries.slice(phase, phase + 2));
-  const anchors = clips.map((clip, index) => intervals
-    ? clip.frames.findIndex(frame => frame.time >= intervals[index][0] && frame.time < intervals[index][1])
-    : frameIndex(clip.anchor, clip.frames));
-  if (anchors.includes(-1)) {
-    status.textContent = '비교 보류 · 선택 구간에 양쪽의 분석 표본이 필요합니다.';
-    return;
-  }
-  const values = clips.map((clip, index) => {
-    const reference = clip.frames[anchors[index]];
-    if (!intervals) clip.anchorStatus.textContent = '정렬에 사용한 분석 표본 ' + seconds(reference.time);
-    return measureFrames(clip.frames, clip.video.videoWidth, clip.video.videoHeight, clip.side.value, reference);
-  });
-  pairs = pairedSamples(...values, ...anchors, sampleRate);
-  if (intervals) {
-    pairs = pairs.filter(pair => pair.time >= 0 && pair.a.time < intervals[0][1] && pair.b.time < intervals[1][1]);
-    const [durationA, durationB] = intervals.map(([startTime, endTime]) => endTime - startTime);
-    phaseDuration.textContent = swingPhases[phase] + ' · 지정 구간 길이 A ' + seconds(durationA) +
+  if (mode === '') {
+    if (clips.some(clip => clip.anchor === undefined)) {
+      status.textContent = '수동 기준점 비교 · 두 영상에서 기준점을 각각 지정하세요.';
+      return;
+    }
+    const anchors = clips.map(clip => frameIndex(clip.anchor, clip.frames));
+    const values = clips.map((clip, index) => {
+      clip.anchorStatus.textContent = '정렬에 사용한 분석 표본 ' + seconds(clip.frames[anchors[index]].time);
+      return measurementsFor(clip, anchors[index]);
+    });
+    pairs = pairedSamples(...values, ...anchors, sampleRate);
+  } else {
+    if (clips.some(clip => !clip.boundaries)) {
+      for (const clip of clips.filter(clip => !clip.boundaries)) clip.phaseEditor.open = true;
+    status.textContent = '비교 보류 · ' + clips.filter(clip => !clip.boundaries).map(clip => clip.label).join(', ') +
+        '에서 비교에 사용할 스윙 구간을 찾기 어려웠습니다. 각 영상의 스윙 후보 및 수동 경계에서 이유를 확인하세요. 구간 경계를 직접 입력하거나 두 영상에서 같은 동작을 기준점으로 지정하면 수동으로 비교할 수 있습니다.';
+      return;
+    }
+    const keys = charts.map(chart => chart.key).filter(key => key !== 'elbow' || (effectiveSide(a) && effectiveSide(a) === effectiveSide(b)));
+    const candidates = mode === 'auto' ? automaticPhaseOrder() : [Number(mode)];
+    let aligned;
+    for (const candidate of candidates) {
+      const trial = alignPhase(candidate);
+      if (trial && hasComparablePhase(trial.pairs, keys)) {
+        aligned = trial;
+        break;
+      }
+    }
+    if (!aligned) {
+      status.textContent = '비교 보류 · 양쪽에서 함께 관측된 표본이 부족합니다. 다른 후보 구간이나 수동 기준점을 확인하세요.';
+      return;
+    }
+    alignedPhase = aligned.phase;
+    pairs = aligned.pairs;
+    const [durationA, durationB] = aligned.intervals.map(([startTime, endTime]) => endTime - startTime);
+    phaseDuration.textContent = swingPhases[alignedPhase] + ' · 실제 구간 길이 A ' + seconds(durationA) +
       ' · B ' + seconds(durationB) + ' · 차이(B−A) ' + seconds(durationB - durationA) +
-      '. 관절 그래프는 구간 내 첫 분석 표본부터 겹치는 시간만 표시합니다.';
+      '. 그래프는 각 구간의 상대 진행률 0–100%에서 가장 가까운 관측 표본을 표시합니다.';
     phaseDuration.hidden = false;
   }
   const first = pairs[0].time;
@@ -314,18 +466,26 @@ function updateComparison() {
   }
   slider.min = 0;
   slider.max = pairs.length - 1;
-  slider.value = -Math.round(first * sampleRate);
+  slider.value = alignedPhase === null ? -Math.round(first * sampleRate) : 0;
   slider.disabled = pairs.length < 2;
   results.hidden = false;
-  status.textContent = '겹치는 분석 시간 ' + seconds(first) + ' ~ ' + seconds(pairs.at(-1).time) +
-    (!a.side.value || !b.side.value ? ' · 팔꿈치 비교에 타구 손 선택이 필요합니다.' :
-      a.side.value !== b.side.value ? ' · 타구 손이 달라 팔꿈치 차이 표시는 보류합니다.' : '');
+  const phaseSource = clips.every(clip => !clip.manualBoundaries) ? '자동 후보' :
+    clips.every(clip => clip.manualBoundaries) ? '수동 경계' : '자동 후보와 수동 경계';
+  status.textContent = (alignedPhase === null
+    ? '기준점 정렬 · ' + seconds(first) + ' ~ ' + seconds(pairs.at(-1).time)
+    : phaseSource + ' 정렬 · ' + swingPhases[alignedPhase] + ' · 상대 진행률 0–100%') +
+    (!effectiveSide(a) || !effectiveSide(b) ? ' · 팔꿈치 비교에 타구 손 선택이 필요합니다.' :
+      effectiveSide(a) !== effectiveSide(b) ? ' · 타구 손이 달라 팔꿈치 차이 표시는 보류합니다.' : '') +
+    (clips.some(clip => !clip.side.value && clip.detectedSide) ? ' · 자동 추정한 타구 손을 영상별 후보에서 확인하세요.' : '') +
+    (cameraView.value === 'different' ? ' · 촬영 방향이 달라 각도 차이 표시는 보류합니다.' :
+      cameraView.value === '' ? ' · 촬영 방향 미확인. 직접 비교에 주의하세요.' : '');
   seekPair();
 }
 
 function difference(pair, key) {
   const [a, b] = clips;
-  if (key === 'elbow' && (!a.side.value || a.side.value !== b.side.value)) return null;
+  if (cameraView.value === 'different') return null;
+  if (key === 'elbow' && (!effectiveSide(a) || effectiveSide(a) !== effectiveSide(b))) return null;
   return measurementDifference(pair, key);
 }
 
@@ -338,7 +498,9 @@ function seekPair() {
     if (Math.abs(clip.video.currentTime - time) > 0.001) clip.video.currentTime = time;
     renderClip(clip);
   });
-  position.textContent = '상대 ' + seconds(pair.time) + ' · A ' + seconds(pair.a.time) + ' · B ' + seconds(pair.b.time);
+  const timeLabel = alignedPhase === null ? '상대 ' + seconds(pair.time) :
+    '구간 진행률 ' + (100 * pair.time).toFixed(0) + '%';
+  position.textContent = timeLabel + ' · A ' + seconds(pair.a.time) + ' · B ' + seconds(pair.b.time);
   for (const chart of charts) {
     const valueA = pair.a[chart.key];
     const valueB = pair.b[chart.key];

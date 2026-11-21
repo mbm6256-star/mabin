@@ -6,6 +6,7 @@
   const fileInput = byId('pose-file');
   const start = byId('pose-start');
   const status = byId('pose-status');
+  let labelTool;
   const preview = byId('pose-preview');
   const progress = byId('pose-progress');
   const video = byId('pose-video');
@@ -168,6 +169,10 @@
       const heading = document.createElement('th');
       heading.scope = 'row';
       heading.textContent = metric.label;
+      const measureType = document.createElement('small');
+      measureType.textContent = metric.key === 'pelvis' || metric.key === 'shoulders'
+        ? '추정 3D 방향 변화' : '2D 투영각';
+      heading.append(document.createElement('br'), measureType);
       const observation = document.createElement('td');
       observation.textContent = metric.key === 'elbow' && !hittingSide.value ? '측정 불가 · 타구 손 선택 필요' :
         !count ? '측정 불가' : count === 1 ? '한 시점에서 ' + min.toFixed(1) + '°가 관측됐습니다.' :
@@ -254,6 +259,7 @@
   function clearResult() {
     stopDrawing();
     frames = [];
+    labelTool?.setFrames([]);
     lastFrame = undefined;
     context.clearRect(0, 0, canvas.width, canvas.height);
     quality.textContent = '';
@@ -270,6 +276,7 @@
   }
 
   async function selectVideo() {
+    labelTool?.select();
     if (selection) {
       selection.controller.abort();
       video.pause();
@@ -303,6 +310,14 @@
       preview.hidden = false;
       start.disabled = false;
       status.textContent = '영상 준비가 끝났습니다. 관절 분석을 시작할 수 있습니다.';
+      void import('./pose-labels.mjs').then(module => {
+        if (clip !== selection) return;
+        labelTool ??= module.createLabelTool(byId('pose-label-tool'), video);
+        labelTool.select(file);
+        labelTool.setFrames(frames);
+      }).catch(() => {
+        if (clip === selection) status.textContent = '영상 준비 완료 · 수동 라벨 도구를 불러오지 못했습니다.';
+      });
     } catch (error) {
       if (clip !== selection) return;
       selection = undefined;
@@ -333,6 +348,7 @@
       });
       signal.throwIfAborted();
       frames = result.frames;
+      labelTool?.setFrames(frames);
       connections = result.connections;
       status.textContent = result.found
         ? '분석 완료 · ' + frames.length + '개 시점 중 ' + result.found + '개에서 관절을 표시할 수 있습니다.'
