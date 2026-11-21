@@ -118,9 +118,10 @@ test('empty DB is an empty array, never sample data',async()=>{
 });
 test('static website is unchanged; environment and server files are private; methods remain read-only',async()=>{
   await withServer({env,fetchImpl:mockFetch()},async base=>{
-    for(const file of ['index.html','app.js','core.js','styles.css','sample-data.json']){
+    for(const file of ['index.html','app.js','core.js','styles.css','pose-analysis.js','pose-metrics.mjs','sample-data.json']){
       const res=await fetch(base+'/'+file);
       assert.equal(res.status,200);
+      if (file==='pose-metrics.mjs') assert.match(res.headers.get('content-type'), /^text\/javascript/);
       assert.equal(await res.text(),await readFile(new URL('./'+file,import.meta.url),'utf8'));
     }
     for(const route of ['/.env','/.env.example','/preview.mjs','/api/missing']) assert.equal((await fetch(base+route)).status,404);

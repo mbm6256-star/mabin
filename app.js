@@ -24,7 +24,7 @@ function updatePlayers() {
   document.querySelectorAll('select.players').forEach(select => {
     const previous = select.value;
     select.replaceChildren();
-    data.players.forEach(p => { const option = document.createElement('option'); option.value = p.id; option.textContent = p.name + ' · ' + p.memberCode; select.append(option); });
+    data.players.forEach(p => { const option = document.createElement('option'); option.value = p.id; option.textContent = p.memberCode ? p.name + ' · ' + p.memberCode : p.name; select.append(option); });
     if (data.players.some(p => p.id === previous)) select.value = previous;
   });
 }

@@ -177,6 +177,58 @@ try{
   assert(!requests.some(r=>/supabase\.(co|com)|sample-data\.json/.test(r.url)));
   assert.deepEqual(errors,[]);
   console.log('PASS API failure, rejected unknown source, retry recovery; browser uses only local APIs; no JS exceptions');
+  if (mockWrites) {
+    await evaluate("location.hash = 'analysis'");
+    await evaluate(`window.selectPoseTestFile = (parts, name) => {
+      const input = document.getElementById('pose-file');
+      const files = new DataTransfer();
+      files.items.add(new File(parts, name, { type: 'video/mp4' }));
+      input.files = files.files;
+      input.dispatchEvent(new Event('change'));
+    }`);
+    await evaluate("selectPoseTestFile(['invalid contents'], 'broken.mp4')");
+    await waitFor("document.getElementById('pose-status').textContent.startsWith('영상 파일 오류')");
+    assert(await evaluate("document.getElementById('pose-start').disabled"));
+    await send('Emulation.clearDeviceMetricsOverride');
+    await send('Network.setBlockedURLs', {urls:['*tasks-vision*','*pose-metrics.mjs']});
+    await send('Page.reload');
+    await waitFor("!document.getElementById('app').hidden");
+    await evaluate(`(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 64;
+      const context = canvas.getContext('2d');
+      const stream = canvas.captureStream(20);
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/mp4' });
+      const chunks = [];
+      recorder.ondataavailable = event => chunks.push(event.data);
+      const stopped = new Promise(resolve => { recorder.onstop = resolve; });
+      recorder.start();
+      let light = false;
+      const timer = setInterval(() => {
+        light = !light;
+        context.fillStyle = light ? '#fff' : '#000';
+        context.fillRect(0, 0, 64, 64);
+      }, 50);
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      clearInterval(timer);
+      recorder.stop();
+      await stopped;
+      stream.getTracks().forEach(track => track.stop());
+      const input = document.getElementById('pose-file');
+      const files = new DataTransfer();
+      files.items.add(new File(chunks, 'valid.mp4', { type: 'video/mp4' }));
+      input.files = files.files;
+      input.dispatchEvent(new Event('change'));
+    })()`);
+    await waitFor("!document.getElementById('pose-start').disabled || document.getElementById('pose-status').textContent.startsWith('영상 파일 오류')");
+    assert(await evaluate("!document.getElementById('pose-preview').hidden"), await evaluate("document.getElementById('pose-status').textContent"));
+    await evaluate("document.getElementById('pose-start').click()");
+    await waitFor("document.getElementById('pose-status').textContent.startsWith('MediaPipe 초기화 오류')");
+    assert(await evaluate("!document.getElementById('pose-start').disabled"));
+    assert.deepEqual(errors, []);
+    console.log('PASS MP4 change events, file errors, readiness without metrics, and MediaPipe startup errors');
+  }
+
   await send('Browser.close',{},null);
 } finally {
   socket?.close();

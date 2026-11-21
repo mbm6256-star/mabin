@@ -4,3 +4,58 @@ a.brand{text-decoration:none}nav a{border:1px solid var(--line);padding:11px 18p
 /* Keep the registration layout visible while DB write APIs are unavailable. */
 .registration-fields{border:0;padding:0;margin:0;min-width:0}
 .registration-fields:disabled input,.registration-fields:disabled select{background:#f0f2eb;color:var(--muted)}
+
+.pose-analysis { margin-block: 1rem; min-width: 0; }
+.pose-analysis input[type="file"] { max-width: 100%; }
+.pose-analysis progress { width: 100%; margin-block: .75rem; }
+.pose-video { position: relative; width: min(100%, 44rem); margin-inline: auto; }
+.pose-video video { display: block; width: 100%; height: auto; background: #10261d; }
+.pose-video canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#pose-quality { min-height: 1.5em; }
+
+.pose-measurements { margin-top: 1.25rem; }
+#pose-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin-bottom: 1rem; }
+#pose-charts figure { min-width: 0; margin: 0; padding: .75rem; border: 1px solid var(--line); border-radius: 12px; }
+#pose-charts figcaption { display: flex; justify-content: space-between; flex-wrap: wrap; gap: .25rem .75rem; font-weight: 700; }
+#pose-charts figcaption span { font-variant-numeric: tabular-nums; }
+#pose-charts svg { display: block; width: 100%; }
+#pose-charts text { fill: var(--muted); font: 13px system-ui, sans-serif; }
+.pose-chart-grid, .pose-chart-trace { fill: none; }
+.pose-chart-grid { stroke: var(--line); }
+.pose-chart-trace { stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.pose-chart-cursor { stroke: var(--muted); stroke-dasharray: 3 3; }
+@media (max-width: 720px) { #pose-charts { grid-template-columns: minmax(0, 1fr); } }
+
+.pose-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 1rem; }
+.pose-3d { min-width: 0; }
+.pose-3d-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .5rem; }
+.pose-3d-heading h3 { margin: 0; }
+.pose-3d-heading .btn { font-size: .875rem; padding: .4rem .65rem; }
+#pose-3d-view { aspect-ratio: 4 / 3; width: 100%; background: #142c26; border-radius: 10px; overflow: hidden; }
+#pose-3d-view canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+#pose-3d-view canvas:active { cursor: grabbing; }
+#pose-3d-status { margin: .4rem 0 0; font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) { .pose-comparison { grid-template-columns: minmax(0, 1fr); } }
+
+.pose-report-controls { display: flex; align-items: end; flex-wrap: wrap; gap: .75rem; }
+.pose-report-controls label { margin-top: 0; }
+.pose-report-table { white-space: normal; }
+.pose-report-table th, .pose-report-table td { padding: .6rem; vertical-align: top; }
+
+.pose-compare-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}
+.pose-compare-clip{min-width:0;padding-top:1rem}
+.compare-3d-view{aspect-ratio:4/3;background:#142c26;border-radius:10px;overflow:hidden}
+.compare-3d-view canvas{display:block;width:100%;height:100%;cursor:grab}
+#pose-compare-time{padding:.25rem 0}
+#pose-compare-charts figure{margin:0;border:1px solid var(--line);border-radius:12px;padding:.75rem;min-width:0}
+#pose-compare-charts figcaption{font-weight:700}
+#pose-compare-charts svg{display:block;width:100%}
+#pose-compare-charts text{fill:var(--muted);font:12px system-ui,sans-serif}
+.compare-a{stroke:#22675e}.compare-b{stroke:#675598}.compare-available{fill:none;stroke:#678b30;stroke-width:5;stroke-linecap:round}
+@media(max-width:720px){.pose-compare-grid{grid-template-columns:minmax(0,1fr)}}
+
+.compare-phase-timeline { position: relative; height: 2rem; background: var(--line); border-radius: .35rem; }
+.compare-phase-timeline button { position: absolute; top: 0; height: 100%; padding: 0; overflow: hidden; border: 1px solid white; background: #22675e; color: white; }
+.compare-phase-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; margin-block: .75rem; }
+.compare-phase-inputs label { margin: 0; min-width: 0; }
+.compare-phase-inputs input { min-width: 0; }

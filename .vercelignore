@@ -1,0 +1,17 @@
+/*
+!/api
+!/server
+!/scripts
+!/vercel.json
+!/.vercelignore
+!/index.html
+!/styles.css
+!/core.js
+!/app.js
+!/pose-analysis.js
+!/pose-metrics.mjs
+!/pose-3d.mjs
+!/pose-engine.mjs
+!/pose-compare.mjs
+!/pose-phases.mjs
+.env*

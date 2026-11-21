@@ -4,74 +4,12 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import Tennis from './core.js';
+import {ApiError, configuration, playersFrom, query, readResponse} from './server/read-api.mjs';
 import {randomBytes} from 'node:crypto';
 const root=path.dirname(fileURLToPath(import.meta.url));
 try{process.loadEnvFile(path.join(root,'.env'));}catch(error){if(error.code!=='ENOENT') throw Error('Unable to load server .env file');}
-const files=new Set(['index.html','styles.css','core.js','app.js','sample-data.json','STORYBOARD.html','PRD.md','ACCEPTANCE.md','README.md']);
-const types={'.html':'text/html','.css':'text/css','.js':'text/javascript','.json':'application/json','.md':'text/plain'};
-class ApiError extends Error {
-  constructor(status,code,message){super(message);this.status=status;this.code=code;}
-}
-function configuration(env){
-  if(!env.SUPABASE_URL||!env.SUPABASE_SECRET_KEY||env.SUPABASE_SECRET_KEY==='REPLACE_WITH_YOUR_SERVER_SECRET')
-    throw new ApiError(503,'SUPABASE_NOT_CONFIGURED','서버 .env에 SUPABASE_URL과 SUPABASE_SECRET_KEY를 설정해주세요.');
-  let url;
-  try{url=new URL(env.SUPABASE_URL);}catch{}
-  if(!url||url.protocol!=='https:'||url.username||url.password||url.search||url.hash||url.pathname!=='/'||!env.SUPABASE_SECRET_KEY.startsWith('sb_secret_'))
-    throw new ApiError(503,'SUPABASE_CONFIG_INVALID','Supabase HTTPS 프로젝트 URL과 sb_secret_ 서버 키를 확인해주세요.');
-  return {url,key:env.SUPABASE_SECRET_KEY};
-}
-async function query(config,table,select,order,fetchImpl,signal){
-  const rows=[];
-  for(;;){
-    const url=new URL('/rest/v1/'+table,config.url);
-    url.search=new URLSearchParams({select,order,limit:'500',offset:String(rows.length)});
-    let response;
-    try{
-      response=await fetchImpl(url,{headers:{apikey:config.key,Prefer:'count=exact'},signal,redirect:'error'});
-    }catch{
-      throw new ApiError(502,signal.aborted?'SUPABASE_TIMEOUT':'SUPABASE_UNAVAILABLE',signal.aborted?'Supabase 조회 시간이 초과되었습니다.':'Supabase에 연결할 수 없습니다.');
-    }
-    if(!response.ok) throw new ApiError(502,'SUPABASE_REQUEST_FAILED',`Supabase 조회 실패 (HTTP ${response.status}). 키, Data API 및 테이블 조회 권한을 확인해주세요.`);
-    let page;
-    try{page=await response.json();}catch{
-      if(signal.aborted) throw new ApiError(502,'SUPABASE_TIMEOUT','Supabase 조회 시간이 초과되었습니다.');
-      throw new ApiError(502,'SUPABASE_INVALID_DATA','Supabase JSON 응답을 읽을 수 없습니다.');
-    }
-    const total=Number(response.headers.get('content-range')?.split('/')[1]);
-    if(!Array.isArray(page)||!Number.isSafeInteger(total)||total<0||rows.length+page.length>total||(!page.length&&rows.length<total))
-      throw new ApiError(502,'SUPABASE_INVALID_DATA','Supabase 응답 또는 페이지 범위가 올바르지 않습니다.');
-    rows.push(...page);
-    if(rows.length===total) return rows;
-  }
-}
-function invalidData(){return new ApiError(502,'SUPABASE_INVALID_DATA','Supabase 선수, 경기 또는 세트 데이터가 올바르지 않습니다.');}
-function playersFrom(rows){
-  const ids=new Set();
-  return rows.map(p=>{
-    if(!p||typeof p.id!=='string'||!p.id||ids.has(p.id)||typeof p.name!=='string'||!p.name.trim()||(p.member_code!==null&&typeof p.member_code!=='string')) throw invalidData();
-    ids.add(p.id);
-    return {id:p.id,name:p.name,memberCode:p.member_code??''};
-  });
-}
-function matchesFrom(rows,players){
-  const ids=new Set();
-  const seen=[];
-  return rows.map(m=>{
-    // Cast bigint to text in PostgREST before JSON parsing to preserve precision.
-    if(!m||typeof m.id!=='string'||!/^\d+$/.test(m.id)||ids.has(m.id)||!Array.isArray(m.match_sets)) throw invalidData();
-    ids.add(m.id);
-    const sets=[...m.match_sets].sort((a,b)=>a.set_number-b.set_number);
-    if(sets.some((s,i)=>s.set_number!==i+1)) throw invalidData();
-    const result={id:m.id,date:m.played_at,a:m.player_a_id,b:m.player_b_id,sets:sets.map(s=>[s.player_a_games,s.player_b_games])};
-    try{
-      Tennis.validateMatch(result,players,seen);
-      if(m.winner_id!==(Tennis.validateSets(result.sets).a===2?result.a:result.b)) throw Error();
-    }catch{throw invalidData();}
-    seen.push(result);
-    return result;
-  });
-}
+const files=new Set(['index.html','styles.css','core.js','app.js','pose-analysis.js','pose-metrics.mjs','pose-3d.mjs','pose-engine.mjs','pose-compare.mjs','pose-phases.mjs','sample-data.json','STORYBOARD.html','PRD.md','ACCEPTANCE.md','README.md']);
+const types={'.html':'text/html','.css':'text/css','.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.md':'text/plain'};
 function localRequest(req){
   const origin=`http://127.0.0.1:${req.socket.localPort}`;
   return req.socket.localAddress==='127.0.0.1'&&req.socket.remoteAddress==='127.0.0.1'
@@ -168,19 +106,11 @@ return http.createServer(async(req,res)=>{
   }
   if(!['GET','HEAD'].includes(req.method)){res.writeHead(405,{'Allow':pathname==='/api/matches'?'GET, HEAD, POST':'GET, HEAD'});res.end();return;}
   if(pathname==='/api/players'||pathname==='/api/matches'){
-    try{
-      const config=configuration(env);
-      const signal=AbortSignal.timeout(timeoutMs);
-      const players=playersFrom(await query(config,'players','id,name,member_code','id.asc',fetchImpl,signal));
-      const data=pathname==='/api/players'?players:matchesFrom(await query(config,'matches','id::text,played_at,player_a_id,player_b_id,winner_id,match_sets(set_number,player_a_games,player_b_games)','played_at.asc,id.asc',fetchImpl,signal),players);
-      const body=JSON.stringify(data);
-      res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Data-Source':'supabase'});
-      res.end(req.method==='HEAD'?undefined:body);
-    }catch(error){
-      const failure=error instanceof ApiError?error:invalidData();
-      res.writeHead(failure.status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Data-Source':'supabase'});
-      res.end(req.method==='HEAD'?undefined:JSON.stringify({source:'supabase',code:failure.code,error:failure.message}));
-    }
+    const response=await readResponse(pathname.slice('/api/'.length),req.method,{
+      env,fetchImpl,timeoutMs,includeMemberCodes:true
+    });
+    res.writeHead(response.status,Object.fromEntries(response.headers));
+    res.end(req.method==='HEAD'?undefined:await response.text());
     return;
   }
   const file=pathname==='/'?'index.html':pathname.slice(1);
